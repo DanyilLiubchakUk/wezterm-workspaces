@@ -1539,7 +1539,16 @@ delete_workspace = function(window, pane, name)
     if read_workspace_sidebar_visible()
       and type(sync_workspace_sidebar_later) == "function"
     then
-      sync_workspace_sidebar_later(window, 0.12, false)
+      if deleting_active and type(prewarm_workspace_sidebar) == "function" then
+        local ok = prewarm_workspace_sidebar(fallback, false)
+        if not ok and wezterm.time and wezterm.time.call_after then
+          wezterm.time.call_after(0.2, function()
+            prewarm_workspace_sidebar(fallback, false)
+          end)
+        end
+      else
+        sync_workspace_sidebar_later(window, 0.12, false)
+      end
     end
   end
 
