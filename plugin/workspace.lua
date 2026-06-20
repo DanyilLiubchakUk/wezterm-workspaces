@@ -1018,6 +1018,11 @@ wezterm.on("user-var-changed", function(window, pane, name, value)
   if name == "wezterm_workspace" then
     local target = tostring(value or ""):match("^([^\t]+)")
     switch_to_workspace(window, pane, target)
+  elseif name == "wezterm_workspace_create_line"
+    and type(create_workspace_from_line) == "function"
+  then
+    local line = tostring(value or ""):match("^([^\t]+)")
+    create_workspace_from_line(window, pane, line)
   elseif name == "wezterm_workspace_create" and type(create_workspace) == "function" then
     create_workspace(window, pane)
   elseif name == "wezterm_workspace_rename" and type(rename_workspace) == "function" then
@@ -1195,27 +1200,32 @@ function open_workspace_switcher(window, pane)
   )
 end
 
+function create_workspace_from_line(window, pane, line)
+  if line == nil then return nil end
+
+  local title, desc = split_title_desc(line, "workspace")
+  if title == "" then return nil end
+
+  local name = unique_workspace_name(title)
+  persist_workspace_record {
+    name = name,
+    label = title,
+    title = title,
+    desc = desc,
+    note = desc,
+    path = "live pane line",
+  }
+  write_workspace_sidebar_data(window, name)
+  switch_to_workspace(window, pane, name)
+  return name
+end
+
 function create_workspace(window, pane)
   window:perform_action(
     wezterm.action.PromptInputLine {
       description = "Workspace title | description:",
       action = wezterm.action_callback(function(win, p, line)
-        if line == nil then return end
-
-        local title, desc = split_title_desc(line, "workspace")
-        if title == "" then return end
-
-        local name = unique_workspace_name(title)
-        persist_workspace_record {
-          name = name,
-          label = title,
-          title = title,
-          desc = desc,
-          note = desc,
-          path = "live pane line",
-        }
-        switch_to_workspace(win, p, name)
-        write_workspace_sidebar_data(win, name)
+        create_workspace_from_line(win, p, line)
       end),
     },
     pane
@@ -2009,7 +2019,24 @@ end
 
 local function sidebar_create_or_send_key(key, mods)
   return wezterm.action_callback(function(window, pane)
-    create_workspace(window, pane)
+    local function send_create_to_sidebar(sidebar)
+      if not sidebar then return false end
+      pcall(function() sidebar:activate() end)
+      window:perform_action(wezterm.action.SendString("\x1bn"), sidebar)
+      return true
+    end
+
+    local sidebar = type(find_workspace_sidebar) == "function"
+      and find_workspace_sidebar(window, true)
+      or nil
+    if send_create_to_sidebar(sidebar) then return end
+
+    open_workspace_sidebar(window, pane, true)
+    if wezterm.time and wezterm.time.call_after then
+      wezterm.time.call_after(0.25, function()
+        send_create_to_sidebar(find_workspace_sidebar(window, true))
+      end)
+    end
   end)
 end
 

@@ -525,6 +525,39 @@ delete_selected() {
   fi
 }
 
+prompt_create_workspace() {
+  local width height line
+  width="$(pane_width)"
+  height="$(pane_height)"
+
+  printf '%s%b\033[H\033[2J%b' "$show_cursor" "$bg_panel" "$reset"
+  line_count=0
+  draw_height="$height"
+  fill_canvas "$width" "$height"
+  printf '\033[H'
+  paint_line "$bg_panel" "$fg_title" "WORKSPACE"
+  paint_line "$bg_panel" "$fg_muted" "Title | description"
+  gap
+  printf '%b> %b' "${bg_panel}${fg_text}" "$reset"
+
+  if [[ -n "${saved_tty_state:-}" ]]; then
+    stty "$saved_tty_state" 2>/dev/null || true
+  fi
+
+  IFS= read -r line
+
+  if [[ -n "${saved_tty_state:-}" ]]; then
+    stty -echo -echoctl 2>/dev/null || stty -echo 2>/dev/null || true
+  fi
+  printf '%s' "$hide_cursor"
+
+  if [[ -n "${line//[[:space:]]/}" ]]; then
+    emit_user_var "wezterm_workspace_create_line" "$line	$$:$RANDOM:$SECONDS"
+  fi
+
+  draw
+}
+
 read_escape_sequence() {
   local seq=$'\033'
   local ch
@@ -629,8 +662,8 @@ while true; do
     $'\033\177'|$'\033\b'|$'\033[3~')
       delete_selected
       ;;
-    $'\033n'|$'\033N')
-      emit_user_var "wezterm_workspace_create" "$$:$RANDOM:$SECONDS"
+    n|N|$'\033n'|$'\033N')
+      prompt_create_workspace
       ;;
     r|R)
       emit_user_var "wezterm_workspace_rename" "$active_name	$$:$RANDOM:$SECONDS"
