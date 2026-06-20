@@ -251,8 +251,8 @@ fallback_data() {
 
 data_mtime() {
   local workspace_mtime help_mtime
-  workspace_mtime="$(stat -f %m "$data_file" 2>/dev/null || print -- "0")"
-  help_mtime="$(stat -f %m "$help_state_file" 2>/dev/null || print -- "0")"
+  workspace_mtime="$(stat -f "%m:%z" "$data_file" 2>/dev/null || print -- "0:0")"
+  help_mtime="$(stat -f "%m:%z" "$help_state_file" 2>/dev/null || print -- "0:0")"
   print -- "${workspace_mtime}:${help_mtime}"
 }
 

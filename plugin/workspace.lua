@@ -119,6 +119,8 @@ local function normalize_workspace_record(record, index)
 end
 
 local function encode_workspace_store(list)
+  if not list or #list == 0 then return "[]" end
+
   if wezterm.json_encode then return wezterm.json_encode(list) end
 
   local rows = {}
@@ -1441,17 +1443,9 @@ local function tab_sidebar_infos(tab)
   return sidebars
 end
 
-kill_pane_by_id = function(pane)
-  if not pane then return end
-  local ok, kill_method = pcall(function() return pane.kill end)
-  if ok and type(kill_method) == "function" then
-    pcall(function() pane:kill() end)
-    return
-  end
-
+local function kill_pane_with_cli(id)
   if type(wezterm.run_child_process) ~= "function" then return end
 
-  local id = tostring(pane_id(pane))
   local bins = {
     "/opt/homebrew/bin/wezterm",
     "/Applications/WezTerm.app/Contents/MacOS/wezterm",
@@ -1473,6 +1467,18 @@ kill_pane_by_id = function(pane)
       return
 	  end
 	end
+end
+
+kill_pane_by_id = function(pane)
+  if not pane then return end
+
+  local id = tostring(pane_id(pane))
+  local ok, kill_method = pcall(function() return pane.kill end)
+  if ok and type(kill_method) == "function" then
+    pcall(function() pane:kill() end)
+  end
+
+  kill_pane_with_cli(id)
 end
 
 local function kill_sidebar_mux_pane(pane)
@@ -1520,10 +1526,39 @@ local function kill_workspace_mux(name)
   end
 end
 
+local function workspace_mux_panes(name)
+  local mux_window = mux_window_for_workspace(name)
+  local panes = {}
+  if not mux_window then return panes end
+
+  for _, tab in ipairs(mux_window_tabs(mux_window)) do
+    for _, pane in ipairs(mux_tab_panes(tab)) do
+      table.insert(panes, pane)
+    end
+  end
+
+  return panes
+end
+
+local function close_workspace_panes_with_window(window, panes)
+  if not window or not panes or #panes == 0 then return end
+
+  for _, target_pane in ipairs(panes) do
+    pcall(function() target_pane:activate() end)
+    pcall(function()
+      window:perform_action(
+        wezterm.action.CloseCurrentPane { confirm = false },
+        target_pane
+      )
+    end)
+  end
+end
+
 delete_workspace = function(window, pane, name)
   local target = normalize_workspace_name(name)
   if target == "" or target == startup_workspace_name then return end
 
+  local panes_to_close = workspace_mux_panes(target)
   local removed, remaining = delete_workspace_record(target)
   if not removed then return end
 
@@ -1538,6 +1573,7 @@ delete_workspace = function(window, pane, name)
   end
 
   local function finish_delete()
+    close_workspace_panes_with_window(window, panes_to_close)
     kill_workspace_mux(target)
     write_workspace_sidebar_data(window, deleting_active and fallback or nil)
 
@@ -1545,12 +1581,18 @@ delete_workspace = function(window, pane, name)
       and type(sync_workspace_sidebar_later) == "function"
     then
       if deleting_active and type(prewarm_workspace_sidebar) == "function" then
-        local ok = prewarm_workspace_sidebar(fallback, false)
-        if not ok and wezterm.time and wezterm.time.call_after then
+        local function restore_sidebar(attempts)
+          local ok = prewarm_workspace_sidebar(fallback, false)
+          if ok or attempts <= 0 or not (wezterm.time and wezterm.time.call_after) then
+            return
+          end
+
           wezterm.time.call_after(0.2, function()
-            prewarm_workspace_sidebar(fallback, false)
+            restore_sidebar(attempts - 1)
           end)
         end
+
+        restore_sidebar(3)
       else
         sync_workspace_sidebar_later(window, 0.12, false)
       end
