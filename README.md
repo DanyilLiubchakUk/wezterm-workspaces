@@ -8,6 +8,13 @@ This plugin owns only the workspace workflow. It does not set your font, shell,
 window opacity, terminal color scheme, inactive-pane styling, or other personal
 WezTerm appearance settings.
 
+## Preview
+
+Workspace sidebar with project groups, top workspace rail, and regular WezTerm
+panes staying fully usable beside it.
+
+![WezTerm Workspaces sidebar preview](assets/wezterm-workspaces-preview.png)
+
 ## Install
 
 Add this to your `~/.config/wezterm/wezterm.lua`:
