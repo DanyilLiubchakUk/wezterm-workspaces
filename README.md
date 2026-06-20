@@ -2,6 +2,7 @@
 
 A small WezTerm plugin that adds saved workspaces, a keyboard-driven workspace
 sidebar, a clickable top workspace rail, and workspace-aware tab/pane actions.
+Inspired by the workspace-first flow of cmux terminal.
 
 This plugin owns only the workspace workflow. It does not set your font, shell,
 window opacity, terminal color scheme, inactive-pane styling, or other personal
