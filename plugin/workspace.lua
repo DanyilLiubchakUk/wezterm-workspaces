@@ -84,6 +84,21 @@ local function slugify_title(text)
   return slug
 end
 
+local function split_title_desc(line, fallback_desc)
+  local text = tostring(line or ""):match("^%s*(.-)%s*$")
+  local title, desc = text:match("^(.-)%s*|%s*(.-)%s*$")
+  if not title then
+    title = text
+    desc = fallback_desc or "workspace"
+  end
+
+  title = tostring(title or ""):match("^%s*(.-)%s*$")
+  desc = tostring(desc or ""):match("^%s*(.-)%s*$")
+  if desc == "" then desc = fallback_desc or "workspace" end
+
+  return title, desc
+end
+
 local function normalize_workspace_record(record, index)
   if type(record) ~= "table" then return nil end
 
@@ -1183,37 +1198,24 @@ end
 function create_workspace(window, pane)
   window:perform_action(
     wezterm.action.PromptInputLine {
-      description = "Workspace title:",
+      description = "Workspace title | description:",
       action = wezterm.action_callback(function(win, p, line)
         if line == nil then return end
 
-        local title = line:match("^%s*(.-)%s*$")
+        local title, desc = split_title_desc(line, "workspace")
         if title == "" then return end
 
-        win:perform_action(
-          wezterm.action.PromptInputLine {
-            description = "Workspace description:",
-            action = wezterm.action_callback(function(win2, p2, desc_line)
-              if desc_line == nil then return end
-
-              local desc = desc_line:match("^%s*(.-)%s*$")
-              if desc == "" then desc = "workspace" end
-
-              local name = unique_workspace_name(title)
-              persist_workspace_record {
-                name = name,
-                label = title,
-                title = title,
-                desc = desc,
-                note = desc,
-                path = "live pane line",
-              }
-              switch_to_workspace(win2, p2, name)
-              write_workspace_sidebar_data(win2, name)
-            end),
-          },
-          p
-        )
+        local name = unique_workspace_name(title)
+        persist_workspace_record {
+          name = name,
+          label = title,
+          title = title,
+          desc = desc,
+          note = desc,
+          path = "live pane line",
+        }
+        switch_to_workspace(win, p, name)
+        write_workspace_sidebar_data(win, name)
       end),
     },
     pane
@@ -1228,30 +1230,16 @@ function rename_workspace(window, pane)
 
   window:perform_action(
     wezterm.action.PromptInputLine {
-      description = "Workspace title:",
-      initial_value = current_title,
-      action = wezterm.action_callback(function(win, p, line)
+      description = "Workspace title | description:",
+      initial_value = current_title .. " | " .. current_desc,
+      action = wezterm.action_callback(function(win, _p, line)
         if line == nil then return end
 
-        local title = line:match("^%s*(.-)%s*$")
+        local title, desc = split_title_desc(line, current_desc)
         if title == "" then return end
 
-        win:perform_action(
-          wezterm.action.PromptInputLine {
-            description = "Workspace description:",
-            initial_value = current_desc,
-            action = wezterm.action_callback(function(win2, _p2, desc_line)
-              if desc_line == nil then return end
-
-              local desc = desc_line:match("^%s*(.-)%s*$")
-              if desc == "" then desc = "workspace" end
-
-              rename_workspace_record(current, title, desc)
-              write_workspace_sidebar_data(win2, current)
-            end),
-          },
-          p
-        )
+        rename_workspace_record(current, title, desc)
+        write_workspace_sidebar_data(win, current)
       end),
     },
     pane
