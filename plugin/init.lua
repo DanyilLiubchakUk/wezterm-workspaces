@@ -5,18 +5,23 @@ local function find_plugin_dir(wezterm, opts)
     return tostring(opts.plugin_dir):match("^(.-)/?$") .. "/plugin"
   end
 
+  local fallback = nil
   for _, plugin in ipairs(wezterm.plugin.list() or {}) do
     local url = tostring(plugin.url or "")
     local dir = tostring(plugin.plugin_dir or "")
 
-    if url:find("wezterm%-workspaces", 1, false)
-      or dir:find("wezterm%-workspaces", 1, false)
-    then
+    if url:find("github.com/DanyilLiubchakUk/wezterm-workspaces", 1, true) then
       return dir .. "/plugin"
+    end
+
+    if url:find("wezterm-workspaces", 1, true)
+      or dir:find("wezterm-workspaces", 1, true)
+    then
+      fallback = fallback or (dir .. "/plugin")
     end
   end
 
-  return nil
+  return fallback
 end
 
 function M.apply_to_config(config, opts)
