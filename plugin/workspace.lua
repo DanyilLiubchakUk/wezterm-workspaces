@@ -1960,7 +1960,14 @@ sync_workspace_sidebar_later = function(window, delay, focus_sidebar)
 end
 
 local function toggle_workspace_sidebar(window, pane)
-  if read_workspace_sidebar_visible() then
+  local visible = read_workspace_sidebar_visible()
+  local has_sidebar = false
+  if visible and type(find_workspace_sidebar_info) == "function" then
+    local info = find_workspace_sidebar_info(window, true)
+    has_sidebar = info and info.pane ~= nil
+  end
+
+  if visible and has_sidebar then
     write_workspace_sidebar_visible(false)
     close_workspace_sidebar(window, pane, true)
     stop_all_workspace_sidebar_helpers()
