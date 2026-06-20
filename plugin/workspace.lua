@@ -58,6 +58,7 @@ function M.apply_to_config(wezterm, config, user_opts, plugin_dir)
   local last_content_pane_by_tab = {}
 
   local startup_workspace_name = options.startup_workspace
+  local last_workspace_store_content = nil
 
 local function json_escape(s)
   return tostring(s or ""):gsub("\\", "\\\\"):gsub('"', '\\"')
@@ -124,6 +125,7 @@ local function read_workspace_store()
 
   local content = f:read("*a")
   f:close()
+  last_workspace_store_content = content
 
   if wezterm.json_parse then
     local ok, parsed = pcall(wezterm.json_parse, content)
@@ -136,6 +138,7 @@ end
 local function configured_workspaces()
   local raw = read_workspace_store()
   local source = type(raw) == "table" and raw or {}
+  local store_text = tostring(last_workspace_store_content or ""):match("^%s*(.-)%s*$")
   local list = {}
   local seen = {}
 
@@ -148,7 +151,7 @@ local function configured_workspaces()
     end
   end
 
-  if type(raw) ~= "table" then
+  if type(raw) ~= "table" or store_text:sub(1, 1) ~= "[" then
     write_workspace_store(list)
   end
 
@@ -1149,44 +1152,17 @@ function create_workspace(window, pane)
         local name = line:match("^%s*(.-)%s*$")
         if name == "" then return end
 
-        local suggested_title = title_case(name)
-        win:perform_action(
-          wezterm.action.PromptInputLine {
-            description = "Workspace title:",
-            initial_value = suggested_title,
-            action = wezterm.action_callback(function(win2, p2, title_line)
-              if title_line == nil then return end
-
-              local title = title_line:match("^%s*(.-)%s*$")
-              if title == "" then title = suggested_title end
-
-              win2:perform_action(
-                wezterm.action.PromptInputLine {
-                  description = "Workspace description:",
-                  action = wezterm.action_callback(function(win3, p3, desc_line)
-                    if desc_line == nil then return end
-
-                    local desc = desc_line:match("^%s*(.-)%s*$")
-                    if desc == "" then desc = "workspace" end
-
-                    persist_workspace_record {
-                      name = name,
-                      label = title,
-                      title = title,
-                      desc = desc,
-                      note = desc,
-                      path = "live pane line",
-                    }
-                    switch_to_workspace(win3, p3, name)
-                    write_workspace_sidebar_data(win3, name)
-                  end),
-                },
-                p2
-              )
-            end),
-          },
-          p
-        )
+        local title = title_case(name)
+        persist_workspace_record {
+          name = name,
+          label = title,
+          title = title,
+          desc = "workspace",
+          note = "workspace",
+          path = "live pane line",
+        }
+        switch_to_workspace(win, p, name)
+        write_workspace_sidebar_data(win, name)
       end),
     },
     pane
@@ -1963,12 +1939,7 @@ end
 
 local function sidebar_create_or_send_key(key, mods)
   return wezterm.action_callback(function(window, pane)
-    if is_workspace_sidebar_pane_for_action(pane) then
-      create_workspace(window, pane)
-      return
-    end
-
-    window:perform_action(wezterm.action.SendKey { key = key, mods = mods }, pane)
+    create_workspace(window, pane)
   end)
 end
 
