@@ -470,8 +470,10 @@ local write_workspace_sidebar_data
 local open_workspace_switcher
 local rename_workspace
 local create_workspace
+local selected_workspace_from_sidebar_text
 local delete_workspace
 local switch_workspace_relative_impl
+local selected_workspace_for_navigation
 local mux_window_tabs
 local mux_tab_panes
 local mux_window_for_workspace
@@ -532,6 +534,24 @@ local function active_workspace_name(window)
     or startup_workspace_name
 end
 
+local function activate_content_pane_later(window, fallback, delays)
+  local function activate()
+    if type(activate_last_content_pane) == "function" then
+      activate_last_content_pane(window, fallback)
+    elseif fallback and not is_workspace_sidebar_pane(fallback) then
+      pcall(function() fallback:activate() end)
+    end
+  end
+
+  activate()
+
+  if not (wezterm.time and wezterm.time.call_after) then return end
+
+  for _, delay in ipairs(delays or { 0.08, 0.28, 0.65 }) do
+    wezterm.time.call_after(delay, activate)
+  end
+end
+
 local function switch_to_workspace(window, pane, name)
   if not name or name == "" then return end
 
@@ -563,15 +583,7 @@ local function switch_to_workspace(window, pane, name)
 
   window:perform_action(wezterm.action.SwitchToWorkspace { name = name }, target)
 
-  if type(activate_last_content_pane) == "function" then
-    if wezterm.time and wezterm.time.call_after then
-      wezterm.time.call_after(0.08, function()
-        activate_last_content_pane(window)
-      end)
-    else
-      activate_last_content_pane(window)
-    end
-  end
+  activate_content_pane_later(window, target, { 0.08, 0.28, 0.65, 0.9 })
 
   if read_workspace_sidebar_visible()
     and type(sync_workspace_sidebar_later) == "function"
@@ -583,11 +595,7 @@ local function switch_to_workspace(window, pane, name)
       wezterm.time.call_after(0.2, function()
         prewarm_workspace_sidebar(name, false)
       end)
-      wezterm.time.call_after(0.28, function()
-        if type(activate_last_content_pane) == "function" then
-          activate_last_content_pane(window)
-        end
-      end)
+      activate_content_pane_later(window, target, { 0.32, 0.72, 1.0 })
     end
   end
 end
@@ -1157,13 +1165,23 @@ switch_workspace_relative_impl = function(window, pane, delta, create_after_last
     return
   end
 
-  local current = active_workspace_name(window)
-  local index = 1
+  local current = selected_workspace_for_navigation(window, pane)
+    or active_workspace_name(window)
+  local index = nil
   for i, name in ipairs(names) do
     if name == current then
       index = i
       break
     end
+  end
+
+  if not index then
+    if create_after_last and delta > 0 then
+      create_workspace(window, pane)
+      return
+    end
+
+    index = 1
   end
 
   local target = index + delta
@@ -1183,6 +1201,22 @@ local function switch_workspace_relative(delta, create_after_last)
   return wezterm.action_callback(function(window, pane)
     switch_workspace_relative_impl(window, pane, delta, create_after_last)
   end)
+end
+
+selected_workspace_for_navigation = function(window, pane)
+  if type(selected_workspace_from_sidebar_text) ~= "function" then return nil end
+
+  local selected = nil
+  if is_workspace_sidebar_pane_for_action(pane) then
+    selected = selected_workspace_from_sidebar_text(pane)
+  end
+
+  if not selected and type(find_workspace_sidebar) == "function" then
+    selected = selected_workspace_from_sidebar_text(find_workspace_sidebar(window))
+  end
+
+  if selected and workspace_by_name(selected) then return selected end
+  return nil
 end
 
 function open_workspace_switcher(window, pane)
@@ -1225,20 +1259,127 @@ function create_workspace_from_line(window, pane, line)
     path = "live pane line",
   }
   write_workspace_sidebar_data(window, name)
-  switch_to_workspace(window, pane, name)
+
+  local target = pane
+  if type(first_content_pane) == "function" then
+    target = first_content_pane(window) or target
+  end
+
+  switch_to_workspace(window, target, name)
   return name
 end
 
+local function notify_workspace_create_error(window, message)
+  if wezterm.log_error then
+    wezterm.log_error("wezterm-workspaces: " .. message)
+  end
+
+  if window and type(window.toast_notification) == "function" then
+    pcall(function()
+      window:toast_notification("wezterm-workspaces", message, nil, 4000)
+    end)
+  end
+end
+
+local function live_workspace_prompt_submit_pane(window, callback_pane, fallback)
+  local target = nil
+  if type(last_content_pane) == "function" then
+    target = last_content_pane(window)
+  end
+  if target and not is_workspace_sidebar_pane_for_action(target) then
+    return target
+  end
+
+  if type(first_content_pane) == "function" then
+    target = first_content_pane(window)
+  end
+  if target and not is_workspace_sidebar_pane_for_action(target) then
+    return target
+  end
+
+  if callback_pane and not is_workspace_sidebar_pane_for_action(callback_pane) then
+    return callback_pane
+  end
+
+  if fallback and not is_workspace_sidebar_pane_for_action(fallback) then
+    return fallback
+  end
+
+  return callback_pane or fallback
+end
+
+local function create_workspace_prompt_action()
+  return wezterm.action.PromptInputLine {
+    description = "Workspace title | description:",
+    action = wezterm.action_callback(function(win, callback_pane, line)
+      if line == nil then return end
+
+      local target_pane = live_workspace_prompt_submit_pane(
+        win,
+        callback_pane,
+        callback_pane
+      )
+
+      local ok, name = pcall(function()
+        return create_workspace_from_line(win, target_pane, line)
+      end)
+
+      if not ok then
+        notify_workspace_create_error(win, tostring(name))
+      elseif not name and tostring(line):match("%S") then
+        notify_workspace_create_error(win, "Could not create workspace from prompt input")
+      end
+    end),
+  }
+end
+
+local function prompt_workspace_line_with_system_dialog()
+  if type(wezterm.run_child_process) ~= "function" then
+    return nil, false
+  end
+
+  local osascript = "/usr/bin/osascript"
+  local f = io.open(osascript, "r")
+  if not f then return nil, false end
+  f:close()
+
+  local script = [[
+try
+  set dialogResult to display dialog "Workspace title | description:" default answer "" with title "wezterm-workspaces" buttons {"Cancel", "Create"} default button "Create" cancel button "Cancel"
+  return text returned of dialogResult
+on error
+  return "__WEZTERM_WORKSPACES_CANCEL__"
+end try
+]]
+
+  local ok, stdout = wezterm.run_child_process { osascript, "-e", script }
+  if not ok then return nil, false end
+
+  local line = tostring(stdout or ""):gsub("[\r\n]+$", "")
+  if line == "__WEZTERM_WORKSPACES_CANCEL__" then return nil, true end
+  return line, true
+end
+
 function create_workspace(window, pane)
-  window:perform_action(
-    wezterm.action.PromptInputLine {
-      description = "Workspace title | description:",
-      action = wezterm.action_callback(function(win, p, line)
-        create_workspace_from_line(win, p, line)
-      end),
-    },
-    pane
-  )
+  local line, handled = prompt_workspace_line_with_system_dialog()
+  if handled then
+    if line == nil then return end
+
+    local target_pane = live_workspace_prompt_submit_pane(window, pane, pane)
+
+    local ok, name = pcall(function()
+      return create_workspace_from_line(window, target_pane, line)
+    end)
+
+    if not ok then
+      notify_workspace_create_error(window, tostring(name))
+    elseif not name and tostring(line):match("%S") then
+      notify_workspace_create_error(window, "Could not create workspace from prompt input")
+    end
+    return
+  end
+
+  window:perform_action(create_workspace_prompt_action(), pane)
 end
 
 function rename_workspace(window, pane)
@@ -1624,7 +1765,16 @@ prewarm_workspace_sidebar = function(name, focus_sidebar)
     else
       local content_info = tab_first_content_pane_info(tab)
       local content = content_info and content_info.pane or nil
-      if content then pcall(function() content:activate() end) end
+      if content then
+        pcall(function() content:activate() end)
+        if wezterm.time and wezterm.time.call_after then
+          for _, delay in ipairs({ 0.12, 0.4, 0.75 }) do
+            wezterm.time.call_after(delay, function()
+              pcall(function() content:activate() end)
+            end)
+          end
+        end
+      end
     end
     return true
   end
@@ -1665,6 +1815,13 @@ prewarm_workspace_sidebar = function(name, focus_sidebar)
       pcall(function() sidebar:activate() end)
     else
       pcall(function() content:activate() end)
+      if wezterm.time and wezterm.time.call_after then
+        for _, delay in ipairs({ 0.12, 0.4, 0.75 }) do
+          wezterm.time.call_after(delay, function()
+            pcall(function() content:activate() end)
+          end)
+        end
+      end
     end
   else
     workspace_sidebar_prewarm_pending_by_tab[tab_id] = nil
@@ -1973,6 +2130,9 @@ function open_workspace_sidebar(window, pane, focus_sidebar)
       workspace_sidebar_split_pending = false
       if tab_id then workspace_sidebar_prewarm_pending_by_tab[tab_id] = nil end
       dedupe_workspace_sidebars(window, false)
+      if not focus_sidebar then
+        activate_content_from_sidebar(window, target)
+      end
     end)
   else
     workspace_sidebar_split_pending = false
@@ -2066,7 +2226,7 @@ local function close_sidebar_or_current_pane(window, pane)
   end
 end
 
-local function selected_workspace_from_sidebar_text(pane)
+selected_workspace_from_sidebar_text = function(pane)
   local ok, text = pcall(function()
     if type(pane.get_lines_as_text) == "function" then
       return pane:get_lines_as_text(80)
@@ -2105,8 +2265,10 @@ end
     local keys = {
       { key = "w", mods = "CMD", action = wezterm.action_callback(close_sidebar_or_current_pane) },
       { key = "Backspace", mods = "ALT", action = wezterm.action_callback(sidebar_delete_or_send_backspace) },
-      { key = "n", mods = "ALT", action = switch_workspace_relative(1, true) },
-      { key = "N", mods = "ALT|SHIFT", action = switch_workspace_relative(1, true) },
+      { key = "n", mods = "ALT", action = wezterm.action_callback(create_workspace) },
+      { key = "N", mods = "ALT|SHIFT", action = wezterm.action_callback(create_workspace) },
+      { key = "phys:N", mods = "ALT", action = wezterm.action_callback(create_workspace) },
+      { key = "phys:N", mods = "ALT|SHIFT", action = wezterm.action_callback(create_workspace) },
       { key = "LeftArrow", mods = "CMD", action = wezterm.action_callback(activate_previous_tab) },
       { key = "RightArrow", mods = "CMD", action = wezterm.action_callback(activate_next_or_create_tab) },
       { key = "R", mods = "ALT", action = wezterm.action_callback(rename_tab) },
@@ -2130,7 +2292,15 @@ end
       { key = "_", mods = "ALT|SHIFT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Up", size = { Percent = 50 } }) },
       { key = "-", mods = "ALT|SHIFT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Up", size = { Percent = 50 } }) },
       { key = "UpArrow", mods = "CMD", action = switch_workspace_relative(-1, false) },
+      { key = "mapped:UpArrow", mods = "CMD", action = switch_workspace_relative(-1, false) },
+      { key = "phys:UpArrow", mods = "CMD", action = switch_workspace_relative(-1, false) },
+      { key = "ApplicationUpArrow", mods = "CMD", action = switch_workspace_relative(-1, false) },
+      { key = "Home", mods = "CMD", action = switch_workspace_relative(-1, false) },
       { key = "DownArrow", mods = "CMD", action = switch_workspace_relative(1, true) },
+      { key = "mapped:DownArrow", mods = "CMD", action = switch_workspace_relative(1, true) },
+      { key = "phys:DownArrow", mods = "CMD", action = switch_workspace_relative(1, true) },
+      { key = "ApplicationDownArrow", mods = "CMD", action = switch_workspace_relative(1, true) },
+      { key = "End", mods = "CMD", action = switch_workspace_relative(1, true) },
     }
 
     for number = 1, 9 do

@@ -55,7 +55,7 @@ Command+D            show/hide workspace names on top
 Option+W             fuzzy workspace switcher
 Command+Option+1..9  switch to workspace 1..9, or create the next slot
 Command+Up/Down      previous/next workspace; Down creates after the last one
-Option+N             same as Command+Down
+Option+N             create workspace
 Option+Shift+R       rename current workspace
 
 Command+Left/Right   previous/next tab
@@ -73,7 +73,7 @@ Inside the sidebar:
 
 ```text
 [1-9]/Enter          open selected workspace
-Option+N             same as Command+Down
+Option+N             create workspace
 Option+Backspace     delete selected workspace
 Up/Down              select workspace
 Option+/             hide/show shortcut help
@@ -81,6 +81,9 @@ Option+/             hide/show shortcut help
 
 The plugin does not bind `Option+Left` or `Option+Right`, so shells and WezTerm
 prompts can keep using those keys for word-by-word cursor movement.
+
+On macOS, workspace creation uses a small system dialog so repeated creates keep
+keyboard focus even when the sidebar pane is active.
 
 ## Options
 

@@ -93,6 +93,10 @@ emit_workspace_next_or_create() {
   emit_user_var "wezterm_workspace_next_or_create" "$$:$RANDOM:$SECONDS"
 }
 
+emit_workspace_create() {
+  emit_user_var "wezterm_workspace_create" "$$:$RANDOM:$SECONDS"
+}
+
 emit_sidebar_selection() {
   if [[ -n "${names[$selected_index]:-}" ]]; then
     emit_user_var "wezterm_workspace_selected" "${names[$selected_index]}	$$:$RANDOM:$SECONDS"
@@ -363,11 +367,11 @@ draw_header() {
     paint_doc_pair "⇅" "select" "$width"
   elif (( width < 42 )); then
     paint_doc_line "[1-9]/↵ open"
-    paint_doc_line "⌥+N next/new  ⌥+⌫ delete"
+    paint_doc_line "⌥+N new  ⌥+⌫ delete"
     paint_doc_line "⇅ select  ⌘+⇅ move"
     paint_doc_line "⌥+/ hide shortcuts"
   else
-    paint_doc_line "[1-9]/↵ open    ⌥+N next/new    ⌥+⌫ delete"
+    paint_doc_line "[1-9]/↵ open    ⌥+N new    ⌥+⌫ delete"
     paint_doc_line "⇅ select       ⌘+⌥+[1-9] workspace"
     paint_doc_line "⌘+⇅ workspaces ⌘+⇄ tabs"
     paint_doc_line "⌘+B panel       ⌘+D top names"
@@ -634,7 +638,7 @@ while true; do
       delete_selected
       ;;
     n|N|$'\033n'|$'\033N')
-      emit_workspace_next_or_create
+      emit_workspace_create
       ;;
     r|R)
       emit_user_var "wezterm_workspace_rename" "$active_name	$$:$RANDOM:$SECONDS"
