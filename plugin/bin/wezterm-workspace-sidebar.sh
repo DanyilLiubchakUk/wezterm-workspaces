@@ -13,6 +13,12 @@ typeset -gA row_to_index
 scroll_offset=0
 selected_index=0
 redraw_pending=0
+last_emitted_selection=""
+last_wheel_ms=0
+last_wheel_direction=0
+wheel_throttle_ms=200
+
+zmodload zsh/datetime 2>/dev/null || true
 
 reset=$'\033[0m'
 bold=$'\033[1m'
@@ -28,11 +34,15 @@ bg_panel=$'\033[48;2;13;15;19m'
 bg_panel_soft=$'\033[48;2;16;18;23m'
 bg_active=$'\033[48;2;0;156;255m'
 bg_active_soft=$'\033[48;2;0;118;235m'
+bg_selected=$'\033[48;2;30;43;58m'
+bg_selected_soft=$'\033[48;2;21;30;42m'
 fg_title=$'\033[38;2;236;239;244m'
 fg_text=$'\033[38;2;203;213;225m'
 fg_muted=$'\033[38;2;137;148;164m'
 fg_dim=$'\033[38;2;89;97;112m'
 fg_accent=$'\033[38;2;125;211;252m'
+fg_selected=$'\033[38;2;232;240;248m'
+fg_selected_subtle=$'\033[38;2;174;195;219m'
 fg_active=$'\033[38;2;255;255;255m'
 fg_active_subtle=$'\033[38;2;219;234;254m'
 fg_key=$'\033[38;2;229;231;235m'
@@ -43,7 +53,7 @@ cleanup() {
   if [[ -n "${saved_tty_state:-}" ]]; then
     stty "$saved_tty_state" 2>/dev/null || true
   fi
-  printf "%s%s%s%s" "$reset" "$show_cursor" "$mouse_off" "$exit_alt"
+  printf "%s%s%s%s%s" "$sync_end" "$reset" "$show_cursor" "$mouse_off" "$exit_alt"
 }
 
 if [[ -n "$saved_tty_state" ]]; then
@@ -73,6 +83,20 @@ positive_int() {
   print -- "$value"
 }
 
+epoch_ms() {
+  local stamp="${EPOCHREALTIME:-}"
+  local seconds fraction
+
+  if [[ -z "$stamp" ]]; then
+    print -- $(( SECONDS * 1000 ))
+    return
+  fi
+
+  seconds="${stamp%%.*}"
+  fraction="${stamp#*.}000"
+  print -- $(( seconds * 1000 + ${fraction[1,3]} ))
+}
+
 emit_user_var() {
   local name="$1"
   local raw="${2:-1}"
@@ -98,8 +122,11 @@ emit_workspace_create() {
 }
 
 emit_sidebar_selection() {
-  if [[ -n "${names[$selected_index]:-}" ]]; then
-    emit_user_var "wezterm_workspace_selected" "${names[$selected_index]}	$$:$RANDOM:$SECONDS"
+  local selected="${names[$selected_index]:-}"
+
+  if [[ -n "$selected" && "$selected" != "$last_emitted_selection" ]]; then
+    last_emitted_selection="$selected"
+    emit_user_var "wezterm_workspace_selected" "$selected	$$:$RANDOM:$SECONDS"
   fi
 }
 
@@ -317,21 +344,32 @@ active_index() {
 ensure_active_visible() {
   local active_i="$1"
   local list_height="$2"
+  local width="${3:-$(pane_width)}"
 
   if (( active_i < 1 )); then
     scroll_offset=0
     return
   fi
 
+  clamp_scroll_offset "$list_height" "$width"
+
   if (( active_i <= scroll_offset )); then
     scroll_offset=$((active_i - 1))
-  elif (( active_i > scroll_offset + list_height )); then
-    scroll_offset=$((active_i - list_height))
   fi
 
   if (( scroll_offset < 0 )); then
     scroll_offset=0
   fi
+
+  local selected_bottom
+  selected_bottom="$(visible_item_bottom "$active_i" "$width")"
+
+  while (( selected_bottom > list_height && scroll_offset < active_i - 1 )); do
+    (( scroll_offset++ ))
+    selected_bottom="$(visible_item_bottom "$active_i" "$width")"
+  done
+
+  clamp_scroll_offset "$list_height" "$width"
 }
 
 ensure_selected_index() {
@@ -348,6 +386,118 @@ ensure_selected_index() {
 
   if (( selected_index < 1 || selected_index > ${#names[@]} )); then
     selected_index="$fallback"
+  fi
+}
+
+group_height() {
+  local i="$1"
+  local width="${2:-$(pane_width)}"
+  local rows=1
+
+  width="$(positive_int "$width" 1)"
+
+  if (( width >= 14 )); then
+    rows=2
+    [[ -n "${previews[$i]:-}" ]] && (( rows++ ))
+    [[ -n "${paths[$i]:-}" ]] && (( rows++ ))
+  fi
+
+  (( rows++ ))
+  print -- "$rows"
+}
+
+visible_item_bottom() {
+  local target="$1"
+  local width="${2:-$(pane_width)}"
+  local row=0
+  local i rows
+
+  for (( i = scroll_offset + 1; i <= target; i++ )); do
+    rows="$(group_height "$i" "$width")"
+    row=$((row + rows))
+  done
+
+  print -- "$row"
+}
+
+max_scroll_offset() {
+  local list_height="$1"
+  local width="${2:-$(pane_width)}"
+  local used=0
+  local i rows
+
+  if (( ${#names[@]} == 0 )); then
+    print -- "0"
+    return
+  fi
+
+  for (( i = ${#names[@]}; i >= 1; i-- )); do
+    rows="$(group_height "$i" "$width")"
+    if (( used > 0 && used + rows > list_height )); then
+      print -- "$i"
+      return
+    fi
+    used=$((used + rows))
+  done
+
+  print -- "0"
+}
+
+clamp_scroll_offset() {
+  local list_height="$1"
+  local width="${2:-$(pane_width)}"
+  local max_offset
+
+  max_offset="$(max_scroll_offset "$list_height" "$width")"
+
+  if (( scroll_offset < 0 )); then
+    scroll_offset=0
+  elif (( scroll_offset > max_offset )); then
+    scroll_offset="$max_offset"
+  fi
+}
+
+last_visible_index() {
+  local list_height="$1"
+  local width="${2:-$(pane_width)}"
+  local row=0
+  local last=$((scroll_offset + 1))
+  local i rows
+
+  if (( ${#names[@]} == 0 )); then
+    print -- "0"
+    return
+  fi
+
+  for (( i = scroll_offset + 1; i <= ${#names[@]}; i++ )); do
+    rows="$(group_height "$i" "$width")"
+    if (( row > 0 && row + rows > list_height )); then
+      break
+    fi
+    row=$((row + rows))
+    last="$i"
+  done
+
+  print -- "$last"
+}
+
+clamp_selected_to_viewport() {
+  local list_height="$1"
+  local width="${2:-$(pane_width)}"
+  local first last
+
+  if (( ${#names[@]} == 0 )); then
+    selected_index=0
+    return
+  fi
+
+  first=$((scroll_offset + 1))
+  last="$(last_visible_index "$list_height" "$width")"
+
+  if (( selected_index < first )); then
+    selected_index="$first"
+  elif (( selected_index > last )); then
+    selected_index="$last"
   fi
 }
 
@@ -392,6 +542,7 @@ draw_group() {
   local i="$1"
   local marker=" "
   local bg="$bg_panel"
+  local bg_gap="$bg_panel_soft"
   local fg_main="$fg_text"
   local fg_sub="$fg_muted"
   local fg_path="$fg_dim"
@@ -404,15 +555,17 @@ draw_group() {
   if [[ "$names[$i]" == "$active_name" ]]; then
     marker=">"
     bg="$bg_active"
+    bg_gap="$bg_panel"
     fg_main="${fg_active}${bold}"
     fg_sub="$fg_active_subtle"
     fg_path="$fg_active_subtle"
   elif (( i == selected_index )); then
-    marker="*"
-    bg="$bg_panel_soft"
-    fg_main="${fg_accent}${bold}"
-    fg_sub="$fg_text"
-    fg_path="$fg_muted"
+    marker="•"
+    bg="$bg_selected"
+    bg_gap="$bg_selected_soft"
+    fg_main="${fg_selected}${bold}"
+    fg_sub="$fg_selected_subtle"
+    fg_path="$fg_selected_subtle"
   fi
 
   if (( width < 14 )); then
@@ -437,7 +590,7 @@ draw_group() {
   if [[ "$names[$i]" == "$active_name" ]]; then
     gap
   else
-    paint_line "$bg_panel_soft" "$fg_dim" ""
+    paint_line "$bg_gap" "$fg_dim" ""
   fi
 
   local row
@@ -448,6 +601,7 @@ draw_group() {
 }
 
 draw() {
+  local keep_selection_visible="${1:-1}"
   redraw_pending=0
   load_workspaces
   row_to_index=()
@@ -462,13 +616,12 @@ draw() {
   active_i="$(active_index)"
   ensure_selected_index "$active_i"
 
-  printf '%s%s' "$hide_cursor" "$mouse_on"
+  printf '%s%s%s' "$sync_start" "$hide_cursor" "$mouse_on"
   printf '\033]0;workspace-sidebar\007\033]2;workspace-sidebar\007'
-  printf '%b\033[H\033[2J%b' "$bg_panel" "$reset"
+  printf '%b\033[H%b' "$bg_panel" "$reset"
 
   line_count=0
   draw_height="$height"
-  fill_canvas "$width" "$height"
   draw_header "$active_i"
 
   local list_height=$((height - line_count))
@@ -476,10 +629,23 @@ draw() {
     list_height=4
   fi
 
-  ensure_active_visible "$selected_index" "$list_height"
+  if (( keep_selection_visible )); then
+    ensure_active_visible "$selected_index" "$list_height" "$width"
+  else
+    clamp_scroll_offset "$list_height" "$width"
+    clamp_selected_to_viewport "$list_height" "$width"
+  fi
 
   local i=$((scroll_offset + 1))
-  while (( i <= ${#names[@]} && line_count + 4 <= height )); do
+  local first_visible="$i"
+  local remaining needed
+  while (( i <= ${#names[@]} && line_count < height )); do
+    remaining=$((height - line_count))
+    needed="$(group_height "$i" "$width")"
+    if (( i > first_visible && needed > remaining )); then
+      break
+    fi
+
     draw_group "$i"
     (( i++ ))
   done
@@ -488,7 +654,7 @@ draw() {
     gap
   done
 
-  printf '\033[H%s' "$reset"
+  printf '\033[H%s%s' "$reset" "$sync_end"
   last_data_mtime="$(data_mtime)"
   emit_sidebar_selection
 }
@@ -511,6 +677,41 @@ move_selection() {
   fi
 
   draw
+}
+
+scroll_viewport() {
+  local delta="$1"
+  load_workspaces
+  ensure_selected_index "$(active_index)"
+
+  if (( ${#names[@]} == 0 )); then
+    draw 0
+    return
+  fi
+
+  scroll_offset=$((scroll_offset + delta))
+  if (( scroll_offset < 0 )); then
+    scroll_offset=0
+  fi
+
+  draw 0
+}
+
+handle_wheel() {
+  local delta="$1"
+  local direction="$delta"
+  local now
+
+  now="$(epoch_ms)"
+  if (( last_wheel_ms > 0
+    && direction == last_wheel_direction
+    && now - last_wheel_ms < wheel_throttle_ms )); then
+    return 0
+  fi
+
+  last_wheel_ms="$now"
+  last_wheel_direction="$direction"
+  scroll_viewport "$delta"
 }
 
 activate_selected() {
@@ -591,7 +792,22 @@ handle_mouse() {
 
   local button="${parts[1]:-}"
   local row="${parts[3]:-}"
-  [[ "$button" == "0" && -n "$row" ]] || return 1
+  [[ -n "$button" && -n "$row" ]] || return 1
+
+  if [[ "$button" == <-> ]] && (( button >= 64 )); then
+    case $(( (button - 64) % 4 )) in
+      0)
+        handle_wheel -1
+        return 0
+        ;;
+      1)
+        handle_wheel 1
+        return 0
+        ;;
+    esac
+  fi
+
+  [[ "$button" == "0" ]] || return 1
 
   local idx="${row_to_index[$row]:-}"
   if [[ -n "$idx" && -n "${names[$idx]:-}" ]]; then
@@ -650,15 +866,10 @@ while true; do
       toggle_help
       ;;
     j)
-      (( scroll_offset++ ))
-      draw
+      scroll_viewport 1
       ;;
     k)
-      (( scroll_offset-- ))
-      if (( scroll_offset < 0 )); then
-        scroll_offset=0
-      fi
-      draw
+      scroll_viewport -1
       ;;
     [1-9])
       idx="$key"
