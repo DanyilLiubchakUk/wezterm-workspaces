@@ -59,6 +59,7 @@ function M.apply_to_config(wezterm, config, user_opts, plugin_dir)
 
   local startup_workspace_name = options.startup_workspace
   local last_workspace_store_content = nil
+  math.randomseed(os.time())
 
 local function json_escape(s)
   return tostring(s or ""):gsub("\\", "\\\\"):gsub('"', '\\"')
@@ -69,6 +70,18 @@ local function title_case(text)
   return text:gsub("(%S)(%S*)", function(first, rest)
     return first:upper() .. rest:lower()
   end)
+end
+
+local function slugify_title(text)
+  local slug = tostring(text or ""):lower()
+    :gsub("[^%w%s%-_]+", "")
+    :gsub("[%s_]+", "-")
+    :gsub("%-+", "-")
+    :gsub("^%-+", "")
+    :gsub("%-+$", "")
+
+  if slug == "" then return "workspace" end
+  return slug
 end
 
 local function normalize_workspace_record(record, index)
@@ -175,19 +188,37 @@ local function persist_workspace_record(record)
   write_workspace_store(list)
 end
 
-local function rename_workspace_record(old_name, new_name)
+local function unique_workspace_name(title)
+  local list = configured_workspaces()
+  local used = {}
+  for _, workspace in ipairs(list) do
+    used[workspace.name] = true
+  end
+
+  local slug = slugify_title(title)
+  for _ = 1, 20 do
+    local suffix = string.format("%06x", math.random(0, 0xffffff))
+    local name = slug .. "-" .. suffix
+    if not used[name] then return name end
+  end
+
+  return slug .. "-" .. tostring(os.time())
+end
+
+local function rename_workspace_record(name, title, desc)
   local list = configured_workspaces()
   local found = false
+  local clean_title = tostring(title or ""):match("^%s*(.-)%s*$")
+  local clean_desc = tostring(desc or ""):match("^%s*(.-)%s*$")
+  if clean_title == "" then return end
+  if clean_desc == "" then clean_desc = "workspace" end
 
   for index, workspace in ipairs(list) do
-    if workspace.name == old_name then
-      workspace.name = new_name
-      if workspace.label == old_name or workspace.label == title_case(old_name) then
-        workspace.label = title_case(new_name)
-      end
-      if workspace.title == old_name or workspace.title == title_case(old_name) then
-        workspace.title = title_case(new_name)
-      end
+    if workspace.name == name then
+      workspace.label = clean_title
+      workspace.title = clean_title
+      workspace.desc = clean_desc
+      workspace.note = clean_desc
       workspace.key = tostring(index <= 9 and index or "")
       found = true
       break
@@ -195,7 +226,14 @@ local function rename_workspace_record(old_name, new_name)
   end
 
   if not found then
-    table.insert(list, normalize_workspace_record({ name = new_name }, #list + 1))
+    table.insert(list, normalize_workspace_record({
+      name = name,
+      label = clean_title,
+      title = clean_title,
+      desc = clean_desc,
+      note = clean_desc,
+      path = "live pane line",
+    }, #list + 1))
   end
 
   write_workspace_store(list)
@@ -1145,24 +1183,37 @@ end
 function create_workspace(window, pane)
   window:perform_action(
     wezterm.action.PromptInputLine {
-      description = "New workspace name:",
+      description = "Workspace title:",
       action = wezterm.action_callback(function(win, p, line)
         if line == nil then return end
 
-        local name = line:match("^%s*(.-)%s*$")
-        if name == "" then return end
+        local title = line:match("^%s*(.-)%s*$")
+        if title == "" then return end
 
-        local title = title_case(name)
-        persist_workspace_record {
-          name = name,
-          label = title,
-          title = title,
-          desc = "workspace",
-          note = "workspace",
-          path = "live pane line",
-        }
-        switch_to_workspace(win, p, name)
-        write_workspace_sidebar_data(win, name)
+        win:perform_action(
+          wezterm.action.PromptInputLine {
+            description = "Workspace description:",
+            action = wezterm.action_callback(function(win2, p2, desc_line)
+              if desc_line == nil then return end
+
+              local desc = desc_line:match("^%s*(.-)%s*$")
+              if desc == "" then desc = "workspace" end
+
+              local name = unique_workspace_name(title)
+              persist_workspace_record {
+                name = name,
+                label = title,
+                title = title,
+                desc = desc,
+                note = desc,
+                path = "live pane line",
+              }
+              switch_to_workspace(win2, p2, name)
+              write_workspace_sidebar_data(win2, name)
+            end),
+          },
+          p
+        )
       end),
     },
     pane
@@ -1171,21 +1222,36 @@ end
 
 function rename_workspace(window, pane)
   local current = active_workspace_name(window)
+  local current_meta = workspace_meta(current, 1)
+  local current_title = current_meta and current_meta.title or title_case(current)
+  local current_desc = current_meta and current_meta.desc or "workspace"
 
   window:perform_action(
     wezterm.action.PromptInputLine {
-      description = "Workspace name:",
-      initial_value = current,
-      action = wezterm.action_callback(function(_win, _pane, line)
+      description = "Workspace title:",
+      initial_value = current_title,
+      action = wezterm.action_callback(function(win, p, line)
         if line == nil then return end
 
-        local name = line:match("^%s*(.-)%s*$")
-        if name == "" or name == current then return end
+        local title = line:match("^%s*(.-)%s*$")
+        if title == "" then return end
 
-        pcall(function()
-          wezterm.mux.rename_workspace(current, name)
-        end)
-        rename_workspace_record(current, name)
+        win:perform_action(
+          wezterm.action.PromptInputLine {
+            description = "Workspace description:",
+            initial_value = current_desc,
+            action = wezterm.action_callback(function(win2, _p2, desc_line)
+              if desc_line == nil then return end
+
+              local desc = desc_line:match("^%s*(.-)%s*$")
+              if desc == "" then desc = "workspace" end
+
+              rename_workspace_record(current, title, desc)
+              write_workspace_sidebar_data(win2, current)
+            end),
+          },
+          p
+        )
       end),
     },
     pane
