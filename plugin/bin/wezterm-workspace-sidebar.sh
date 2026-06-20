@@ -89,6 +89,10 @@ emit_workspace_delete() {
   emit_user_var "wezterm_workspace_delete" "$1	$$:$RANDOM:$SECONDS"
 }
 
+emit_workspace_next_or_create() {
+  emit_user_var "wezterm_workspace_next_or_create" "$$:$RANDOM:$SECONDS"
+}
+
 emit_sidebar_selection() {
   if [[ -n "${names[$selected_index]:-}" ]]; then
     emit_user_var "wezterm_workspace_selected" "${names[$selected_index]}	$$:$RANDOM:$SECONDS"
@@ -359,11 +363,11 @@ draw_header() {
     paint_doc_pair "↑↓" "select" "$width"
   elif (( width < 42 )); then
     paint_doc_line "[1-9]/↵ open"
-    paint_doc_line "⌥+N new  ⌥+⌫ delete"
+    paint_doc_line "⌥+N next/new  ⌥+⌫ delete"
     paint_doc_line "↑↓ select  ⌥+↑↓ move"
     paint_doc_line "⌥+/ hide shortcuts"
   else
-    paint_doc_line "[1-9]/↵ open    ⌥+N new    ⌥+⌫ delete"
+    paint_doc_line "[1-9]/↵ open    ⌥+N next/new    ⌥+⌫ delete"
     paint_doc_line "↑↓ select       ⌘+⌥+[1-9] workspace"
     paint_doc_line "⌥+↑↓ workspaces ⌥+⇄ tabs"
     paint_doc_line "⌘+B panel       ⌘+D top names"
@@ -374,7 +378,7 @@ draw_header() {
 
   if (( ${#names[@]} == 0 || i < 1 )); then
     paint_line "$bg_panel" "${fg_title}${bold}" "  No workspaces yet"
-    paint_line "$bg_panel" "$fg_muted" "  Press ⌥+N to add your first one"
+    paint_line "$bg_panel" "$fg_muted" "  Press ⌥+↓ or ⌥+N to add your first one"
     gap
     return
   fi
@@ -525,39 +529,6 @@ delete_selected() {
   fi
 }
 
-prompt_create_workspace() {
-  local width height line
-  width="$(pane_width)"
-  height="$(pane_height)"
-
-  printf '%s%b\033[H\033[2J%b' "$show_cursor" "$bg_panel" "$reset"
-  line_count=0
-  draw_height="$height"
-  fill_canvas "$width" "$height"
-  printf '\033[H'
-  paint_line "$bg_panel" "$fg_title" "WORKSPACE"
-  paint_line "$bg_panel" "$fg_muted" "Title | description"
-  gap
-  printf '%b> %b' "${bg_panel}${fg_text}" "$reset"
-
-  if [[ -n "${saved_tty_state:-}" ]]; then
-    stty "$saved_tty_state" 2>/dev/null || true
-  fi
-
-  IFS= read -r line
-
-  if [[ -n "${saved_tty_state:-}" ]]; then
-    stty -echo -echoctl 2>/dev/null || stty -echo 2>/dev/null || true
-  fi
-  printf '%s' "$hide_cursor"
-
-  if [[ -n "${line//[[:space:]]/}" ]]; then
-    emit_user_var "wezterm_workspace_create_line" "$line	$$:$RANDOM:$SECONDS"
-  fi
-
-  draw
-}
-
 read_escape_sequence() {
   local seq=$'\033'
   local ch
@@ -663,7 +634,7 @@ while true; do
       delete_selected
       ;;
     n|N|$'\033n'|$'\033N')
-      prompt_create_workspace
+      emit_workspace_next_or_create
       ;;
     r|R)
       emit_user_var "wezterm_workspace_rename" "$active_name	$$:$RANDOM:$SECONDS"

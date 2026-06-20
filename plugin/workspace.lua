@@ -469,6 +469,7 @@ local open_workspace_switcher
 local rename_workspace
 local create_workspace
 local delete_workspace
+local switch_workspace_relative_impl
 local mux_window_tabs
 local mux_tab_panes
 local mux_window_for_workspace
@@ -1025,6 +1026,8 @@ wezterm.on("user-var-changed", function(window, pane, name, value)
     create_workspace_from_line(window, pane, line)
   elseif name == "wezterm_workspace_create" and type(create_workspace) == "function" then
     create_workspace(window, pane)
+  elseif name == "wezterm_workspace_next_or_create" then
+    switch_workspace_relative_impl(window, pane, 1, true)
   elseif name == "wezterm_workspace_rename" and type(rename_workspace) == "function" then
     rename_workspace(window, pane)
   elseif name == "wezterm_workspace_delete" and type(delete_workspace) == "function" then
@@ -1145,34 +1148,38 @@ local function switch_sidebar_or_send_number(number)
   end)
 end
 
+switch_workspace_relative_impl = function(window, pane, delta, create_after_last)
+  local names = workspace_names()
+  if #names == 0 then
+    if create_after_last then create_workspace(window, pane) end
+    return
+  end
+
+  local current = active_workspace_name(window)
+  local index = 1
+  for i, name in ipairs(names) do
+    if name == current then
+      index = i
+      break
+    end
+  end
+
+  local target = index + delta
+
+  if create_after_last and delta > 0 and target > #names then
+    create_workspace(window, pane)
+    return
+  end
+
+  if target < 1 then target = #names end
+  if target > #names then target = 1 end
+
+  switch_to_workspace(window, pane, names[target])
+end
+
 local function switch_workspace_relative(delta, create_after_last)
   return wezterm.action_callback(function(window, pane)
-    local names = workspace_names()
-    if #names == 0 then
-      if create_after_last then create_workspace(window, pane) end
-      return
-    end
-
-    local current = active_workspace_name(window)
-    local index = 1
-    for i, name in ipairs(names) do
-      if name == current then
-        index = i
-        break
-      end
-    end
-
-    local target = index + delta
-
-    if create_after_last and delta > 0 and target > #names then
-      create_workspace(window, pane)
-      return
-    end
-
-    if target < 1 then target = #names end
-    if target > #names then target = 1 end
-
-    switch_to_workspace(window, pane, names[target])
+    switch_workspace_relative_impl(window, pane, delta, create_after_last)
   end)
 end
 
@@ -2017,29 +2024,6 @@ local function close_sidebar_or_current_pane(window, pane)
   end
 end
 
-local function sidebar_create_or_send_key(key, mods)
-  return wezterm.action_callback(function(window, pane)
-    local function send_create_to_sidebar(sidebar)
-      if not sidebar then return false end
-      pcall(function() sidebar:activate() end)
-      window:perform_action(wezterm.action.SendString("\x1bn"), sidebar)
-      return true
-    end
-
-    local sidebar = type(find_workspace_sidebar) == "function"
-      and find_workspace_sidebar(window, true)
-      or nil
-    if send_create_to_sidebar(sidebar) then return end
-
-    open_workspace_sidebar(window, pane, true)
-    if wezterm.time and wezterm.time.call_after then
-      wezterm.time.call_after(0.25, function()
-        send_create_to_sidebar(find_workspace_sidebar(window, true))
-      end)
-    end
-  end)
-end
-
 local function selected_workspace_from_sidebar_text(pane)
   local ok, text = pcall(function()
     if type(pane.get_lines_as_text) == "function" then
@@ -2079,8 +2063,8 @@ end
     local keys = {
       { key = "w", mods = "CMD", action = wezterm.action_callback(close_sidebar_or_current_pane) },
       { key = "Backspace", mods = "ALT", action = wezterm.action_callback(sidebar_delete_or_send_backspace) },
-      { key = "n", mods = "ALT", action = sidebar_create_or_send_key("n", "ALT") },
-      { key = "N", mods = "ALT|SHIFT", action = sidebar_create_or_send_key("N", "ALT|SHIFT") },
+      { key = "n", mods = "ALT", action = switch_workspace_relative(1, true) },
+      { key = "N", mods = "ALT|SHIFT", action = switch_workspace_relative(1, true) },
       { key = "LeftArrow", mods = "ALT", action = wezterm.action_callback(activate_previous_tab) },
       { key = "RightArrow", mods = "ALT", action = wezterm.action_callback(activate_next_or_create_tab) },
       { key = "R", mods = "ALT", action = wezterm.action_callback(rename_tab) },

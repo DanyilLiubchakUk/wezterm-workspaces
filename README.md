@@ -47,7 +47,8 @@ Command+B            show/hide workspace sidebar
 Command+D            show/hide workspace names on top
 Option+W             fuzzy workspace switcher
 Command+Option+1..9  switch to workspace 1..9, or create the next slot
-Option+Up/Down       previous/next workspace
+Option+Up/Down       previous/next workspace; Down creates after the last one
+Option+N             same as Option+Down
 Option+Shift+R       rename current workspace
 
 Option+Left/Right    previous/next tab
@@ -65,7 +66,7 @@ Inside the sidebar:
 
 ```text
 [1-9]/Enter          open selected workspace
-Option+N             new workspace
+Option+N             same as Option+Down
 Option+Backspace     delete selected workspace
 Up/Down              select workspace
 Option+/             hide/show shortcut help
