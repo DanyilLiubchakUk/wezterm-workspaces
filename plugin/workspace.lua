@@ -777,7 +777,7 @@ local function is_workspace_sidebar_pane_for_action(pane)
   text = tostring(text)
   return text:find("WORKSPACES", 1, true)
     and (
-      text:find("↑↓", 1, true)
+      text:find("⇅", 1, true)
       or text:find("[1-9]/↵", 1, true)
       or text:find("hide shortcuts", 1, true)
       or text:find("show shortcuts", 1, true)
@@ -2065,8 +2065,8 @@ end
       { key = "Backspace", mods = "ALT", action = wezterm.action_callback(sidebar_delete_or_send_backspace) },
       { key = "n", mods = "ALT", action = switch_workspace_relative(1, true) },
       { key = "N", mods = "ALT|SHIFT", action = switch_workspace_relative(1, true) },
-      { key = "LeftArrow", mods = "ALT", action = wezterm.action_callback(activate_previous_tab) },
-      { key = "RightArrow", mods = "ALT", action = wezterm.action_callback(activate_next_or_create_tab) },
+      { key = "LeftArrow", mods = "CMD", action = wezterm.action_callback(activate_previous_tab) },
+      { key = "RightArrow", mods = "CMD", action = wezterm.action_callback(activate_next_or_create_tab) },
       { key = "R", mods = "ALT", action = wezterm.action_callback(rename_tab) },
       { key = "r", mods = "ALT", action = wezterm.action_callback(rename_tab) },
       { key = "W", mods = "ALT", action = wezterm.action_callback(open_workspace_switcher) },
@@ -2081,16 +2081,14 @@ end
       { key = "b", mods = "CMD", action = wezterm.action_callback(toggle_workspace_sidebar) },
       { key = "R", mods = "ALT|SHIFT", action = wezterm.action_callback(rename_workspace) },
       { key = "r", mods = "ALT|SHIFT", action = wezterm.action_callback(rename_workspace) },
-      { key = "LeftArrow", mods = "ALT|SHIFT", action = switch_workspace_relative(-1) },
-      { key = "RightArrow", mods = "ALT|SHIFT", action = switch_workspace_relative(1) },
       { key = "\\", mods = "ALT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Right", size = { Percent = 50 } }) },
       { key = "\\", mods = "ALT|SHIFT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Left", size = { Percent = 50 } }) },
       { key = "|", mods = "ALT|SHIFT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Left", size = { Percent = 50 } }) },
       { key = "-", mods = "ALT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Down", size = { Percent = 50 } }) },
       { key = "_", mods = "ALT|SHIFT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Up", size = { Percent = 50 } }) },
       { key = "-", mods = "ALT|SHIFT", action = action_on_content_pane(wezterm.action.SplitPane { direction = "Up", size = { Percent = 50 } }) },
-      { key = "UpArrow", mods = "ALT", action = switch_workspace_relative(-1, false) },
-      { key = "DownArrow", mods = "ALT", action = switch_workspace_relative(1, true) },
+      { key = "UpArrow", mods = "CMD", action = switch_workspace_relative(-1, false) },
+      { key = "DownArrow", mods = "CMD", action = switch_workspace_relative(1, true) },
     }
 
     for number = 1, 9 do

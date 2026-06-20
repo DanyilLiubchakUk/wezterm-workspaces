@@ -360,16 +360,16 @@ draw_header() {
   elif (( width < 24 )); then
     paint_doc_pair "⌥+/" "shortcuts" "$width"
     paint_doc_pair "↵" "open" "$width"
-    paint_doc_pair "↑↓" "select" "$width"
+    paint_doc_pair "⇅" "select" "$width"
   elif (( width < 42 )); then
     paint_doc_line "[1-9]/↵ open"
     paint_doc_line "⌥+N next/new  ⌥+⌫ delete"
-    paint_doc_line "↑↓ select  ⌥+↑↓ move"
+    paint_doc_line "⇅ select  ⌘+⇅ move"
     paint_doc_line "⌥+/ hide shortcuts"
   else
     paint_doc_line "[1-9]/↵ open    ⌥+N next/new    ⌥+⌫ delete"
-    paint_doc_line "↑↓ select       ⌘+⌥+[1-9] workspace"
-    paint_doc_line "⌥+↑↓ workspaces ⌥+⇄ tabs"
+    paint_doc_line "⇅ select       ⌘+⌥+[1-9] workspace"
+    paint_doc_line "⌘+⇅ workspaces ⌘+⇄ tabs"
     paint_doc_line "⌘+B panel       ⌘+D top names"
     paint_doc_line "⌘+W close tab   ⌥+/ hide shortcuts"
   fi
@@ -378,7 +378,7 @@ draw_header() {
 
   if (( ${#names[@]} == 0 || i < 1 )); then
     paint_line "$bg_panel" "${fg_title}${bold}" "  No workspaces yet"
-    paint_line "$bg_panel" "$fg_muted" "  Press ⌥+↓ or ⌥+N to add your first one"
+    paint_line "$bg_panel" "$fg_muted" "  Press ⌘+↓ or ⌥+N to add your first one"
     gap
     return
   fi
